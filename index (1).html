@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aplicación de Captura Facial</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        #video {
+            transform: scaleX(-1);
+        }
+        .face-detected {
+            box-shadow: 0 0 20px rgba(0, 255, 0, 0.7);
+        }
+        .gallery-item {
+            transition: all 0.3s ease;
+        }
+        .gallery-item:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-400">Capturador Facial</h1>
+            <p class="text-gray-400">Toma fotos de tu rostro con la cámara</p>
+        </header>
+
+        <div class="flex flex-col lg:flex-row gap-8">
+            <!-- Sección de Cámara -->
+            <div class="flex-1">
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <h2 class="text-xl font-semibold mb-4">Vista de Cámara</h2>
+                    <div class="relative">
+                        <video id="video" width="640" height="480" autoplay muted 
+                            class="w-full h-auto rounded-lg border-2 border-gray-700"></video>
+                        <canvas id="canvas" class="absolute top-0 left-0"></canvas>
+                    </div>
+                    <div class="mt-4 flex justify-center">
+                        <button id="captureBtn" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition">
+                            Tomar Foto
+                        </button>
+                    </div>
+                    <div id="status" class="mt-4 text-center text-gray-300"></div>
+                </div>
+            </div>
+
+            <!-- Galería de Fotos -->
+            <div class="flex-1">
+                <div class="bg-gray-800 rounded-lg p-4">
+                    <h2 class="text-xl font-semibold mb-4">Fotos Capturadas</h2>
+                    <div id="gallery" class="grid grid-cols-2 gap-4">
+                        <!-- Fotos se agregarán aquí -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Elementos DOM
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const gallery = document.getElementById('gallery');
+        const status = document.getElementById('status');
+
+        // Cargar modelos de detección facial
+        async function loadModels() {
+            status.textContent = 'Cargando modelos de detección facial...';
+            await faceapi.nets.tinyFaceDetector.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+            await faceapi.nets.faceLandmark68Net.loadFromUri('https://justadudewhohacks.github.io/face-api.js/models');
+            status.textContent = 'Modelos cargados. Iniciando cámara...';
+        }
+
+        // Iniciar cámara
+        async function startCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user' 
+                    } 
+                });
+                video.srcObject = stream;
+                status.textContent = 'Cámara iniciada. Detectando rostros...';
+                
+                // Iniciar detección facial
+                detectFaces();
+            } catch (err) {
+                status.textContent = `Error: ${err.message}`;
+                console.error(err);
+            }
+        }
+
+        // Detectar rostros en el video
+        async function detectFaces() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            setInterval(async () => {
+                const detections = await faceapi.detectAllFaces(
+                    video, 
+                    new faceapi.TinyFaceDetectorOptions()
+                ).withFaceLandmarks();
+                
+                // Limpiar canvas
+                const context = canvas.getContext('2d');
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Dibujar detecciones
+                faceapi.draw.drawDetections(canvas, detections);
+                faceapi.draw.drawFaceLandmarks(canvas, detections);
+                
+                // Actualizar estado
+                if (detections.length > 0) {
+                    status.textContent = `${detections.length} rostro(s) detectado(s)`;
+                    video.classList.add('face-detected');
+                } else {
+                    status.textContent = 'No se detectaron rostros';
+                    video.classList.remove('face-detected');
+                }
+            }, 100);
+        }
+
+        // Variables para ráfaga de fotos
+        let isCapturing = false;
+        let photosTaken = 0;
+        const maxPhotos = 5;
+        const captureInterval = 500; // ms entre fotos
+
+        // Función para captura automática
+        function startBurstCapture() {
+            if (!isCapturing && video.classList.contains('face-detected')) {
+                isCapturing = true;
+                photosTaken = 0;
+                status.textContent = 'Preparándose para captura rápida...';
+                
+                setTimeout(() => {
+                    captureNextPhoto();
+                }, 1000); // Pequeño retraso antes de empezar
+            }
+        }
+
+        function captureNextPhoto() {
+            if (photosTaken >= maxPhotos) {
+                isCapturing = false;
+                status.textContent = '¡Ráfaga completada! 5 fotos capturadas';
+                return;
+            }
+
+            // Crear canvas para captura
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = video.videoWidth;
+            captureCanvas.height = video.videoHeight;
+            const context = captureCanvas.getContext('2d');
+            
+            // Dibujar frame del video (espejado)
+            context.translate(captureCanvas.width, 0);
+            context.scale(-1, 1);
+            context.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+            
+            // Crear elemento de imagen
+            const img = document.createElement('img');
+            img.src = captureCanvas.toDataURL('image/png');
+            img.className = 'w-full h-auto rounded-lg border border-gray-600';
+            
+            // Crear contenedor de foto
+            const photoDiv = document.createElement('div');
+            photoDiv.className = 'gallery-item bg-gray-700 p-2 rounded-lg';
+            
+            // Agregar fecha y número de foto
+            const dateSpan = document.createElement('span');
+            dateSpan.className = 'text-xs text-gray-400 block mt-2';
+            dateSpan.textContent = `${new Date().toLocaleString()} (${photosTaken + 1}/${maxPhotos})`;
+            
+            photoDiv.appendChild(img);
+            photoDiv.appendChild(dateSpan);
+            gallery.prepend(photoDiv);
+            
+            photosTaken++;
+            status.textContent = `Capturando ráfaga: ${photosTaken}/${maxPhotos} fotos`;
+            
+            // Capturar siguiente foto después del intervalo
+            if (photosTaken < maxPhotos) {
+                setTimeout(captureNextPhoto, captureInterval);
+            } else {
+                isCapturing = false;
+                status.textContent = '¡Ráfaga completada! 5 fotos capturadas';
+            }
+        }
+
+        // Modificar detección facial para iniciar captura
+        async function detectFaces() {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            
+            setInterval(async () => {
+                const detections = await faceapi.detectAllFaces(
+                    video, 
+                    new faceapi.TinyFaceDetectorOptions()
+                ).withFaceLandmarks();
+                
+                // Limpiar canvas
+                const context = canvas.getContext('2d');
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                
+                // Dibujar detecciones
+                faceapi.draw.drawDetections(canvas, detections);
+                faceapi.draw.drawFaceLandmarks(canvas, detections);
+                
+                // Actualizar estado
+                if (detections.length > 0) {
+                    status.textContent = `${detections.length} rostro(s) detectado(s)`;
+                    video.classList.add('face-detected');
+                    
+                    // Iniciar captura automática si no está en progreso
+                    if (!isCapturing) {
+                        startBurstCapture();
+                    }
+                } else {
+                    status.textContent = 'No se detectaron rostros';
+                    video.classList.remove('face-detected');
+                }
+            }, 100);
+        }
+
+        // Inicializar aplicación
+        loadModels().then(startCamera);
+
+        // Ocultar botón de captura manual
+        captureBtn.style.display = 'none';
+    </script>
+</body>
+</html>
